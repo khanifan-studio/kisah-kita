@@ -180,6 +180,13 @@
   .link-btn{ background:none; font-size:12.5px; color:var(--ink-soft); text-decoration:underline; padding:0; }
   .link-btn:hover{ color:var(--ink); }
 
+  /* POV per orang di tiap momen */
+  .t-pov-wrap{ display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:14px; padding-top:14px; border-top:1.5px dashed var(--line); }
+  @media (max-width:640px){ .t-pov-wrap{ grid-template-columns:1fr; } }
+  .t-pov-head{ font-size:11.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.04em; color:var(--rose-dark); margin-bottom:6px; }
+  .t-pov-text{ font-size:13.5px; line-height:1.55; color:var(--ink); margin:0 0 6px; }
+  .t-pov-empty{ font-size:13px; color:var(--ink-soft); font-style:italic; margin:0 0 6px; }
+
   /* album */
   .album-grid{ display:grid; grid-template-columns:repeat(4,1fr); grid-auto-rows:110px; grid-auto-flow:dense; gap:8px; margin-top:22px; }
   @media (max-width:640px){ .album-grid{ grid-template-columns:repeat(3,1fr); grid-auto-rows:88px; } }
@@ -259,6 +266,7 @@ let albumLayoutMap = {}; // { photoId: 'big' | 'normal' }
 let toastMsg = null;
 let lightboxItem = null;
 let editingProfile = false;
+const SESSION_KEY = 'kisahkita_active_session';
 
 const app = document.getElementById('app');
 
@@ -298,8 +306,20 @@ async function loadAll(){
   dates = (await sGet('dates')) || [];
   album = await loadAlbum();
   answers = (await sGet('answers')) || {};
-  if(!profiles){ view = 'setup'; setupStep = 1; }
-  else{ view = 'login'; }
+  if(!profiles){
+    view = 'setup'; setupStep = 1;
+  } else {
+    // Cek sesi yang masih "nempel" di tab/browser ini (belum ditutup).
+    // Kalau ada & masih valid, langsung ke dashboard tanpa login/reveal lagi ---
+    // ini yang bikin tombol back di browser nggak balik ke layar login.
+    const savedSession = sessionStorage.getItem(SESSION_KEY);
+    if(savedSession && profiles[savedSession]){
+      session = savedSession;
+      view = 'dashboard';
+    } else {
+      view = 'login';
+    }
+  }
   render();
 }
 
@@ -481,6 +501,7 @@ function doLogin(){
   const val = document.getElementById('login_pass').value;
   if(val === profiles[pickedSlot].password){
     session = pickedSlot;
+    sessionStorage.setItem(SESSION_KEY, session);
     view = 'reveal';
     loginError = '';
     render();
@@ -604,7 +625,7 @@ function renderTopbar(){
   </div>`;
 }
 function goto(v){ view=v; editingProfile=false; render(); }
-function logout(){ session=null; pickedSlot=null; view='login'; render(); }
+function logout(){ session=null; pickedSlot=null; sessionStorage.removeItem(SESSION_KEY); view='login'; render(); }
 
 /* ---- Dashboard ---- */
 function renderDashboard(){
@@ -688,6 +709,21 @@ function renderTimeline(){
             <button class="link-btn" onclick="openDateModal('${d.id}')">ubah</button>
             <button class="link-btn" onclick="deleteDate('${d.id}')">hapus</button>
           </div>
+          <div class="t-pov-wrap">
+            ${['slot1','slot2'].map(slot=>{
+              const p = profiles[slot];
+              const text = (d.pov && d.pov[slot]) ? d.pov[slot] : '';
+              const isMine = session === slot;
+              return `
+              <div class="t-pov">
+                <div class="t-pov-head">POV ${escapeHtml(p.name)}${isMine?' (kamu)':''}</div>
+                ${text
+                  ? `<p class="t-pov-text">${nl2br(text)}</p>`
+                  : `<p class="t-pov-empty">${isMine?'Belum kamu isi':'Belum diisi'}</p>`}
+                ${isMine ? `<button class="link-btn" onclick="openPovModal('${d.id}')">${text?'ubah pengalamanmu':'+ tambah pengalamanmu'}</button>` : ''}
+              </div>`;
+            }).join('')}
+          </div>
         </div>
       </div>
     `).join('')}
@@ -718,12 +754,14 @@ function closeDateModal(){ document.getElementById('modalHost').innerHTML=''; da
 function saveDateModal(){
   const title = document.getElementById('dm_title').value.trim();
   if(!title){ showToast('Judul momen wajib diisi'); return; }
+  const existing = dateModalEditingId ? dates.find(d=>d.id===dateModalEditingId) : null;
   const entry = {
     id: dateModalEditingId || ('d'+Date.now()),
     title,
     location: document.getElementById('dm_location').value.trim(),
     date: document.getElementById('dm_date').value,
     note: document.getElementById('dm_note').value.trim(),
+    pov: (existing && existing.pov) ? existing.pov : { slot1:'', slot2:'' },
   };
   if(dateModalEditingId){
     dates = dates.map(d=> d.id===dateModalEditingId ? entry : d);
@@ -734,6 +772,36 @@ function saveDateModal(){
     closeDateModal();
     render();
     showToast('Momen tersimpan 💌');
+  });
+}
+function openPovModal(momentId){
+  const d = dates.find(x=>x.id===momentId);
+  if(!d) return;
+  const text = (d.pov && d.pov[session]) ? d.pov[session] : '';
+  document.getElementById('modalHost').innerHTML = `
+  <div class="modal-bg" onclick="if(event.target===this) closeDateModal()">
+    <div class="modal">
+      <h2 style="font-size:20px;margin-bottom:16px;">Pengalaman versi kamu</h2>
+      <div class="field"><label>Ceritain momen ini dari sudut pandang kamu</label><textarea id="pov_text" placeholder="Waktu itu menurut kamu gimana rasanya?">${escapeHtml(text)}</textarea></div>
+      <div class="row" style="justify-content:flex-end;">
+        <button class="btn btn-ghost stitch" onclick="closeDateModal()">Batal</button>
+        <button class="btn btn-primary" onclick="savePovModal('${momentId}')">Simpan</button>
+      </div>
+    </div>
+  </div>`;
+}
+function savePovModal(momentId){
+  const text = document.getElementById('pov_text').value.trim();
+  dates = dates.map(d=>{
+    if(d.id!==momentId) return d;
+    const pov = d.pov ? {...d.pov} : {slot1:'',slot2:''};
+    pov[session] = text;
+    return {...d, pov};
+  });
+  sSet('dates', dates).then(()=>{
+    closeDateModal();
+    render();
+    showToast('Pengalaman kamu tersimpan 💛');
   });
 }
 function deleteDate(id){
