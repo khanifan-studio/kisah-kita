@@ -222,8 +222,17 @@
   .setup-progress span.done{ background:var(--rose); }
   .toast{ position:fixed; bottom:22px; left:50%; transform:translateX(-50%); background:var(--ink); color:var(--paper); padding:10px 20px; border-radius:999px; font-size:13.5px; z-index:99; box-shadow:var(--shadow); }
   .lightbox-bg{ position:fixed; inset:0; background:rgba(20,14,15,0.88); display:flex; align-items:center; justify-content:center; padding:20px; z-index:60; }
-  .lightbox-bg img{ max-width:90vw; max-height:80vh; object-fit:contain; border-radius:4px; }
-  .lightbox-bg .cap{ color:#fff; text-align:center; margin-top:12px; font-family:'Fraunces',serif; font-style:italic; }
+  .lightbox-card{ max-width:520px; width:100%; max-height:90vh; overflow-y:auto; background:var(--card); border-radius:10px; padding:18px; position:relative; }
+  .lightbox-card img{ display:block; width:100%; max-height:50vh; object-fit:contain; border-radius:4px; background:#000; }
+  .lightbox-card .cap{ text-align:center; margin-top:12px; font-family:'Fraunces',serif; font-style:italic; font-size:15px; }
+  .lb-close{ position:absolute; top:10px; right:10px; background:rgba(0,0,0,0.35); color:#fff; width:28px; height:28px; border-radius:50%; font-size:16px; line-height:1; padding:0; }
+  .lb-comments{ margin-top:16px; padding-top:14px; border-top:1.5px dashed var(--line); display:flex; flex-direction:column; gap:10px; max-height:180px; overflow-y:auto; }
+  .lb-comments-empty{ font-size:13px; color:var(--ink-soft); font-style:italic; margin:0; }
+  .lb-comment{ font-size:13.5px; line-height:1.5; background:var(--paper); border-radius:8px; padding:8px 10px; }
+  .lb-comment-author{ font-weight:700; margin-right:6px; }
+  .lb-comment-form{ display:flex; gap:8px; margin-top:12px; }
+  .lb-comment-form input{ flex:1; border:1.5px solid var(--line); border-radius:8px; padding:8px 10px; font-family:inherit; font-size:13.5px; }
+  .lb-comment-form button{ flex:0 0 auto; padding:8px 16px; font-size:13.5px; }
   .row{ display:flex; gap:10px; flex-wrap:wrap; }
 </style>
 </head>
@@ -910,12 +919,42 @@ function deleteAlbumPhoto(id){
 }
 function openLightbox(id){ lightboxItem = album.find(a=>a.id===id); render(); }
 function renderLightbox(){
-  return `<div class="lightbox-bg" onclick="closeLightbox()">
-    <div style="text-align:center;">
+  const comments = lightboxItem.comments || [];
+  return `<div class="lightbox-bg" onclick="if(event.target===this) closeLightbox()">
+    <div class="lightbox-card">
+      <button class="lb-close" onclick="closeLightbox()">×</button>
       <img src="${lightboxItem.photo}">
       ${lightboxItem.caption? `<div class="cap">${escapeHtml(lightboxItem.caption)}</div>`:''}
+      <div class="lb-comments">
+        ${comments.length===0
+          ? `<p class="lb-comments-empty">Belum ada komentar, jadi yang pertama yuk</p>`
+          : comments.map(c=>`
+            <div class="lb-comment">
+              <span class="lb-comment-author">${escapeHtml(profiles[c.author]?.name || '?')}</span>
+              <span>${nl2br(c.text)}</span>
+            </div>
+          `).join('')}
+      </div>
+      <div class="lb-comment-form">
+        <input type="text" id="lb_comment_input" placeholder="Tulis komentar..." onkeydown="if(event.key==='Enter'){ event.preventDefault(); addLightboxComment(); }">
+        <button class="btn btn-rose" onclick="addLightboxComment()">Kirim</button>
+      </div>
     </div>
   </div>`;
+}
+function addLightboxComment(){
+  const input = document.getElementById('lb_comment_input');
+  const text = input.value.trim();
+  if(!text) return;
+  const item = album.find(a=>a.id===lightboxItem.id);
+  if(!item) return;
+  const comments = [...(item.comments||[]), { author: session, text, ts: Date.now() }];
+  saveAlbumPhoto(item.id, { photo:item.photo, caption:item.caption||'', date:item.date||'', comments }).then(ok=>{
+    if(!ok){ showToast('Gagal mengirim komentar'); return; }
+    item.comments = comments;
+    lightboxItem = item;
+    render();
+  });
 }
 function closeLightbox(){ lightboxItem=null; render(); }
 
